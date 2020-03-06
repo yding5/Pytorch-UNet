@@ -9,6 +9,7 @@ def eval_net(net, loader, device, n_val):
     """Evaluation without the densecrf with the dice coefficient"""
     net.eval()
     tot = 0
+    jac = 0
 
     with tqdm(total=n_val, desc='Validation round', unit='img', leave=False) as pbar:
         for batch in loader:
@@ -26,7 +27,9 @@ def eval_net(net, loader, device, n_val):
                 if net.n_classes > 1:
                     tot += F.cross_entropy(pred.unsqueeze(dim=0), true_mask.unsqueeze(dim=0)).item()
                 else:
-                    tot += dice_coeff(pred, true_mask.squeeze(dim=1)).item()
+                    dice = dice_coeff(pred, true_mask.squeeze(dim=1)).item()
+                    tot += dice
+                    jac += dice/(2-dice)
             pbar.update(imgs.shape[0])
 
-    return tot / n_val
+    return tot / n_val, jac / n_val

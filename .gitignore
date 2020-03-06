@@ -6,3 +6,7 @@ checkpoints/
 *.jpg
 SUBMISSION*
 venv/
+runs/
+*.s
+*.o*
+*.png

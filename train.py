@@ -13,43 +13,60 @@ from eval import eval_net
 from unet import UNet
 
 from torch.utils.tensorboard import SummaryWriter
-from utils.dataset import BasicDataset
+from utils.dataset import *
 from torch.utils.data import DataLoader, random_split
 
-dir_img = 'data/imgs/'
-dir_mask = 'data/masks/'
+from PIL import Image
+
+train_dir_img = 'data/imgs/'
+train_dir_mask = 'data/masks/'
+n_train = 2000
+
+val_dir_img = 'data/val_imgs/'
+val_dir_mask = 'data/val_masks/'
+n_val = 150
+
+test_dir_img = 'data/test_imgs/'
+test_dir_mask = 'data/test_masks/'
+n_val = 600
+
+
 dir_checkpoint = 'checkpoints/'
 
 
 def train_net(net,
               device,
-              epochs=5,
-              batch_size=1,
-              lr=0.1,
+              epochs=120,
+              batch_size=16,
+              lr=0.001,
               val_percent=0.1,
               save_cp=True,
               img_scale=0.5):
 
-    dataset = BasicDataset(dir_img, dir_mask, img_scale)
-    n_val = int(len(dataset) * val_percent)
-    n_train = len(dataset) - n_val
-    train, val = random_split(dataset, [n_train, n_val])
-    train_loader = DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
-    val_loader = DataLoader(val, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True)
+#    dataset = BasicDataset(dir_img, dir_mask, img_scale)
+    train_dataset = Dataset_Aug(train_dir_img, train_dir_mask)
+    val_dataset = Dataset_No_Aug(val_dir_img, val_dir_mask)
+    #n_val = int(len(dataset) * val_percent)
+    #n_train = len(dataset) - n_val
+    #train, val = random_split(dataset, [n_train, n_val])
+    #train_loader = DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True)
+    #val_loader = DataLoader(val, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True)
 
-    writer = SummaryWriter(comment=f'LR_{lr}_BS_{batch_size}_SCALE_{img_scale}')
+    writer = SummaryWriter(comment=f'LR_{lr}_BS_{batch_size}_Epoch_{epochs}')
     global_step = 0
 
     logging.info(f'''Starting training:
         Epochs:          {epochs}
         Batch size:      {batch_size}
         Learning rate:   {lr}
-        Training size:   {n_train}
-        Validation size: {n_val}
         Checkpoints:     {save_cp}
         Device:          {device.type}
         Images scaling:  {img_scale}
     ''')
+        #Training size:   {n_train}
+        #Validation size: {n_val}
 
     optimizer = optim.RMSprop(net.parameters(), lr=lr, weight_decay=1e-8)
     if net.n_classes > 1:
@@ -65,6 +82,28 @@ def train_net(net,
             for batch in train_loader:
                 imgs = batch['image']
                 true_masks = batch['mask']
+                reshaped_std = np.expand_dims(np.array([0.229, 0.224, 0.225]),1)
+                reshaped_std = np.expand_dims(reshaped_std,1)
+                reshaped_mean = np.expand_dims(np.array([0.485, 0.456, 0.406]),1)
+                reshaped_mean = np.expand_dims(reshaped_mean,1)
+                image_log = (imgs.numpy()*reshaped_std+reshaped_mean)*255
+                rescaled = (imgs.numpy()[0]*reshaped_std+reshaped_mean)*255
+                rescaled = np.swapaxes(rescaled,0,1)
+                rescaled = np.swapaxes(rescaled,1,2)
+                im = Image.fromarray(np.uint8(rescaled))
+                im.save('input_image.png')
+                #rescaled = true_masks.numpy()[0,0]*255
+                #im = Image.fromarray(rescaled.astype(np.uint8))
+                #im.save('input_label.png')
+                #print(imgs.shape)
+                #print(torch.max(imgs))
+                #print(torch.min(imgs))
+                #print(true_masks.shape)
+                #print(true_masks)
+                #print(true_masks[0,0,100])
+                #print(true_masks[0,0,:,100])
+                #print(torch.max(true_masks))
+                #print(torch.min(true_masks))
                 assert imgs.shape[1] == net.n_channels, \
                     f'Network has been defined with {net.n_channels} input channels, ' \
                     f'but loaded images have {imgs.shape[1]} channels. Please check that ' \
@@ -87,17 +126,19 @@ def train_net(net,
 
                 pbar.update(imgs.shape[0])
                 global_step += 1
-                if global_step % (len(dataset) // (10 * batch_size)) == 0:
-                    val_score = eval_net(net, val_loader, device, n_val)
+                if global_step % (len(train_dataset) // (1 * batch_size)) == 0:
+                    val_score, jac = eval_net(net, val_loader, device, n_val)
                     if net.n_classes > 1:
                         logging.info('Validation cross entropy: {}'.format(val_score))
                         writer.add_scalar('Loss/test', val_score, global_step)
 
                     else:
                         logging.info('Validation Dice Coeff: {}'.format(val_score))
-                        writer.add_scalar('Dice/test', val_score, global_step)
+                        writer.add_scalar('Dice/val', val_score, global_step)
+                        writer.add_scalar('Jac/val', jac, global_step)
 
                     writer.add_images('images', imgs, global_step)
+                    writer.add_images('yukun_images', image_log, global_step)
                     if net.n_classes == 1:
                         writer.add_images('masks/true', true_masks, global_step)
                         writer.add_images('masks/pred', torch.sigmoid(masks_pred) > 0.5, global_step)

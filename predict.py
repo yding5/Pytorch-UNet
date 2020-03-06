@@ -10,8 +10,10 @@ from torchvision import transforms
 
 from unet import UNet
 from utils.data_vis import plot_img_and_mask
-from utils.dataset import BasicDataset
+from utils.dataset import *
 
+pred_img_dir = 'temp_pred_img'
+pred_mask_dir = 'temp_pred_mask'
 
 def predict_img(net,
                 full_img,
@@ -20,8 +22,10 @@ def predict_img(net,
                 out_threshold=0.5):
     net.eval()
 
-    img = torch.from_numpy(BasicDataset.preprocess(full_img, scale_factor))
+    #img = torch.from_numpy(Dataset_No_Aug(pred_img_dir, pred_mask_dir))
+    dataset = Dataset_No_Aug(pred_img_dir, pred_mask_dir)
 
+    img = dataset.__get_item__(0)['image']
     img = img.unsqueeze(0)
     img = img.to(device=device, dtype=torch.float32)
 
